@@ -88,7 +88,7 @@ def batch_data(batch_size, review_histories, intervals, labels):
     return batches, batched_labels, batched_intervals, masks
 
 
-batch_size = 2
+batch_size = 500
 review_histories, labels, intervals = load_data()
 input_dim = len(review_histories[0][0])
 batches, batched_labels, batched_intervals, masks = batch_data(batch_size, review_histories, intervals, labels)
@@ -97,10 +97,11 @@ batches, batched_labels, batched_intervals, masks = batch_data(batch_size, revie
 #%% Create model
 
 class Model(torch.nn.Module):
-    def __init__(self, input_dim, batch_size, hidden_dim=32):
+    def __init__(self, input_dim, batch_size, hidden_dim=64):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.lstm = torch.nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.linear1 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.head = torch.nn.Linear(hidden_dim, 1)
         self.batch_size = batch_size
 
@@ -115,20 +116,23 @@ class Model(torch.nn.Module):
         h1 = initial_hidden[0][0].detach().numpy()
         h2 = initial_hidden[1][0].detach().numpy()
         b = batch[0].detach().numpy()
-        b2 = batch[1].detach().numpy()
+        # b2 = batch[1].detach().numpy()
         out, hidden = self.lstm(batch, initial_hidden)
-        stability_estimate = torch.squeeze(self.head(out), dim=-1)
+
+        stability_estimate = self.linear1(out)
+        stability_estimate = torch.squeeze(self.head(stability_estimate), dim=-1)
+
         c = stability_estimate.detach().numpy()
-        return F.relu(stability_estimate)
+        return torch.exp(stability_estimate)
 
 
 model = Model(input_dim, batch_size)
-# model.load_state_dict(torch.load('./weights.pth'))
+model.load_state_dict(torch.load('./weights.pth'))
 
 
 #%% Training
 
-opt = torch.optim.RMSprop(model.parameters(), lr=0.0001)
+opt = torch.optim.Adam(model.parameters(), lr=0.0001)
 for epoch in range(1, 100):
     total_loss = 0
     count = 0
@@ -152,6 +156,9 @@ for epoch in range(1, 100):
         criterion = torch.nn.BCELoss(weight=torch.Tensor(mask))
         loss = criterion(probabilities, label)
 
+        # target = (1 - label) * (-interval / np.log(0.05)) + label * (-interval / np.log(0.95))
+        # loss = torch.mean(torch.pow(stability_estimates - target, 2))
+
         criterion2 = torch.nn.BCELoss(weight=torch.Tensor(mask), reduce=False)
         ll = criterion2(probabilities, label).detach().numpy()
 
@@ -170,17 +177,24 @@ torch.save(model.state_dict(), './weights.pth')
 import matplotlib.pyplot as plt
 
 
-sample_history = review_histories[1300]
+sample_history = review_histories[1301]
 sample_history = np.array(sample_history)[np.newaxis]
+s = sample_history[0]
 
 colors = ['r', 'b', 'g', 'y']
+# colors = [(0, 0, 0)]
+estimates = []
 for i in range(sample_history.shape[1]):
-    x = np.arange(0, 1000)
+    x = np.arange(-5, 20, 0.1)
     stability_estimate = model(torch.Tensor(sample_history[:, :i + 1]))[0, -1].item()
-    y = np.exp(-x / (stability_estimate + 0.0000001))
+    y = np.exp(-np.exp(x) / (stability_estimate + 0.0000001))
+    estimates.append(stability_estimate)
 
     print(stability_estimate)
-    plt.plot(x, y, colors[min(i, len(colors) - 1)])
+    # plt.plot(x, y, c=colors[min(i, len(colors) - 1)])
+    plt.plot(x, y, c=(1, .5, .5, (i + 1) / sample_history.shape[1]))
+estimates = np.array(estimates)
+v = np.concatenate((s, np.log(-np.log(0.9) * estimates[:, np.newaxis])), axis=-1)
 plt.ylim(0, 1)
 plt.show()
 
