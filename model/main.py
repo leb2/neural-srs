@@ -2,6 +2,7 @@ import sqlite3
 import numpy as np
 import torch
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 
 #%% Pre-process
@@ -88,16 +89,16 @@ def batch_data(batch_size, review_histories, intervals, labels):
     return batches, batched_labels, batched_intervals, masks
 
 
-batch_size = 500
 review_histories, labels, intervals = load_data()
 input_dim = len(review_histories[0][0])
+batch_size = 500
 batches, batched_labels, batched_intervals, masks = batch_data(batch_size, review_histories, intervals, labels)
 
 
 #%% Create model
 
 class Model(torch.nn.Module):
-    def __init__(self, input_dim, batch_size, hidden_dim=64):
+    def __init__(self, input_dim, batch_size, hidden_dim=128):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.lstm = torch.nn.LSTM(input_dim, hidden_dim, batch_first=True)
@@ -127,15 +128,22 @@ class Model(torch.nn.Module):
 
 
 model = Model(input_dim, batch_size)
-model.load_state_dict(torch.load('./weights.pth'))
+# model.load_state_dict(torch.load('./weights.pth'))
 
 
 #%% Training
 
 opt = torch.optim.Adam(model.parameters(), lr=0.0001)
 for epoch in range(1, 100):
-    total_loss = 0
-    count = 0
+
+    total_train_loss = 0
+    total_validation_loss = 0
+    count_train = 0
+    count_validation = 0
+
+    num_batches = len(batched_labels)
+    num_train_batches = int(num_batches * 0.95)
+
     for index, (data, label, interval, mask) in enumerate(zip(batches, batched_labels, batched_intervals, masks)):
         data = torch.Tensor(data)
         label = torch.Tensor(label)
@@ -149,33 +157,38 @@ for epoch in range(1, 100):
 
         stability_estimates = model(data)
         probabilities = torch.exp(-interval / torch.clamp(stability_estimates, min=0.000001))
-        pr = probabilities.detach().numpy()
 
+        pr = probabilities.detach().numpy()
         s = stability_estimates.detach().numpy()
-        # loss = torch.mean(torch.pow((probabilities - label) * torch.Tensor(mask), 2))
+
         criterion = torch.nn.BCELoss(weight=torch.Tensor(mask))
         loss = criterion(probabilities, label)
-
-        # target = (1 - label) * (-interval / np.log(0.05)) + label * (-interval / np.log(0.95))
-        # loss = torch.mean(torch.pow(stability_estimates - target, 2))
 
         criterion2 = torch.nn.BCELoss(weight=torch.Tensor(mask), reduce=False)
         ll = criterion2(probabilities, label).detach().numpy()
 
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
+        if True or index < num_train_batches:
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
 
-        total_loss += loss
-        count += 1
-    average_loss = total_loss / count
-    print("Epoch %d, loss: %.3f" % (epoch, average_loss))
-torch.save(model.state_dict(), './weights.pth')
+            total_train_loss += loss
+            count_train += 1
+        else:
+            total_validation_loss += loss
+            count_validation += 1
+
+    average_train_loss = total_train_loss / count_train
+    average_validation_loss = 0  # total_validation_loss / count_validation
+
+    print("Epoch %d, loss: %.3f, val loss: %.3f" % (epoch, average_train_loss, average_validation_loss))
+    if epoch % 20 == 0:
+        print("Saving model")
+        torch.save(model.state_dict(), './weights.pth')
+
 
 
 #%% Inference
-import matplotlib.pyplot as plt
-
 
 sample_history = review_histories[1301]
 sample_history = np.array(sample_history)[np.newaxis]
@@ -201,6 +214,55 @@ plt.show()
 # for review in sample_history:
 #     grade, duration, log_interval = review
 
+
+#%% Correlation graph
+batch_size2 = 1
+batches2, batched_labels2, batched_intervals2, masks2 = batch_data(batch_size2, review_histories, intervals, labels)
+
+all_probabilities = []
+all_labels = []
+for index, (data, label, interval, mask) in enumerate(zip(batches2, batched_labels2, batched_intervals2, masks2)):
+    data = torch.Tensor(data)
+    label = torch.Tensor(label)
+    interval = torch.Tensor(interval)
+    stability_estimates = model(data)
+    probabilities = torch.exp(-interval / torch.clamp(stability_estimates, min=0.000001))
+
+    pr = np.squeeze(probabilities.detach().numpy(), axis=0)
+    la = np.squeeze(label.detach().numpy(), axis=0)
+    all_probabilities.append(pr)
+    all_labels.append(la)
+
+all_probabilities = np.concatenate(all_probabilities)
+all_labels = np.concatenate(all_labels)
+
+sorted_probs, sorted_labels = zip(*sorted(zip(all_probabilities, all_labels)))
+sorted_probs = np.array(sorted_probs)
+sorted_labels = np.array(sorted_labels)
+
+
+#%%
+smoothed_labels = []
+smoothed_probs = []
+window = 500
+x_window = 500
+
+# bucket_size = 0.01
+# quartiles = np.arange(0, 1, bucket_size)
+# for quartile in quartiles:
+#     mask = np.logical_and(quartile < sorted_probs, sorted_probs <= (quartile + bucket_size))
+#     smoothed_probs.append(quartile + bucket_size / 2)
+#     smoothed_labels.append(np.mean(sorted_labels[mask]))
+
+for i in range(0, len(sorted_probs), 2 * x_window):
+    smoothed_probs.append(np.mean(sorted_probs[max(i - x_window, 0): i+x_window]))
+    smoothed_labels.append(np.mean(sorted_labels[max(i-window, 0):i+window]))
+
+plt.ylim(0, 1)
+plt.xlim(0, 1)
+plt.scatter(smoothed_probs, smoothed_labels)
+plt.plot([0, 1], [0, 1], 'r')
+plt.show()
 
 
 
