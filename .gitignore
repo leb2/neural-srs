@@ -1,3 +1,6 @@
 .idea/
 collection.anki2*
 weights.pth
+*.csv
+*.txt
+__pycache__/
