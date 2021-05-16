@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
-
+from tqdm import tqdm
 from neural_srs.model.model import Model
 
-from neural_srs.model.util import batch_data, load_data
+from neural_srs.model.util import batch_data, load_data, BATCH_SIZE, NUM_FEATURES
 import torch
 
 
@@ -86,47 +86,47 @@ def plot_model():
     plt.show()
 
 
-def train():
-    review_histories, labels, intervals = load_data()
-    input_dim = len(review_histories[0][0])
-    batch_size = 50
-    batches, batched_labels, batched_intervals, masks = \
-        batch_data(batch_size, review_histories, intervals, labels)
-    model = Model(input_dim, batch_size)
+def train() -> None:
+    reviews = load_data()
+    batches = batch_data(reviews, BATCH_SIZE)
+    num_batches = len(batches)
+    num_train_batches = int(num_batches * 0.95)
+    model = Model(input_dim=NUM_FEATURES, batch_size=BATCH_SIZE)
 
     opt = torch.optim.Adam(model.parameters(), lr=0.0001)
     for epoch in range(1, 100):
-        print("epoch", epoch)
         total_train_loss = 0
         total_validation_loss = 0
         count_train = 0
         count_validation = 0
 
-        num_batches = len(batched_labels)
-        num_train_batches = int(num_batches * 0.95)
+        for index, batch in tqdm(enumerate(batches), total=num_batches):
+            x_data = batch.x_data
+            y_data = batch.y_data
+            intervals = batch.intervals
+            mask = batch.mask
 
-        for index, (data, label, interval, mask) in enumerate(zip(batches, batched_labels, batched_intervals, masks)):
-            data = torch.Tensor(data)
-            label = torch.Tensor(label)
-            interval = torch.Tensor(interval)
+            x_data = torch.Tensor(x_data)
+            y_data = torch.Tensor(y_data)
+            intervals = torch.Tensor(intervals)
 
-            da1 = data[0].detach().numpy()
-            da2 = data[1].detach().numpy()
+            da1 = x_data[0].detach().numpy()
+            da2 = x_data[1].detach().numpy()
 
-            la = label.detach().numpy()
-            inter = interval[0].detach().numpy()
+            la = y_data.detach().numpy()
+            inter = intervals[0].detach().numpy()
 
-            stability_estimates = model(data)
-            probabilities = torch.exp(-interval / torch.clamp(stability_estimates, min=0.000001))
+            stability_estimates = model(x_data)
+            probabilities = torch.exp(-intervals / torch.clamp(stability_estimates, min=0.000001))
 
             pr = probabilities.detach().numpy()
             s = stability_estimates.detach().numpy()
 
             criterion = torch.nn.BCELoss(weight=torch.Tensor(mask))
-            loss = criterion(probabilities, label)
+            loss = criterion(probabilities, y_data)
 
             criterion2 = torch.nn.BCELoss(weight=torch.Tensor(mask), reduce=False)
-            ll = criterion2(probabilities, label).detach().numpy()
+            ll = criterion2(probabilities, y_data).detach().numpy()
 
             if True or index < num_train_batches:
                 opt.zero_grad()
@@ -143,6 +143,6 @@ def train():
         average_validation_loss = 0  # total_validation_loss / count_validation
 
         print("Epoch %d, loss: %.3f, val loss: %.3f" % (epoch, average_train_loss, average_validation_loss))
-        if epoch % 20 == 0:
+        if epoch % 10 == 0:
             print("Saving model")
             torch.save(model.state_dict(), './weights.pth')
