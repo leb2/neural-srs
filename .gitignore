@@ -1,5 +1,6 @@
 .idea/
 collection.anki2*
+*.anki2
 weights.pth
 *.csv
 *.txt

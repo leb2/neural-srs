@@ -1,13 +1,8 @@
 import sqlite3
 import requests
-import re
-
+from neural_srs.model.util import strip_tags
 
 DECK_IDS = [1604047906179, 1533367265407]
-
-
-def strip_tags(text):
-    return re.sub('<[^<]+?>', '', text)
 
 
 def get_vocab_in_decks():

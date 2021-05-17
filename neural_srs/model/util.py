@@ -1,8 +1,10 @@
 from typing import NamedTuple, List
-
+import datetime
+import re
 
 import numpy as np
-from neural_srs.model.parse import Review
+
+from neural_srs.model.types import Review
 
 
 class VectorizedReviews(NamedTuple):
@@ -20,3 +22,13 @@ def vectorize_reviews(reviews: List[Review]) -> VectorizedReviews:
         y_data.append(review.label)
         intervals.append(review.next_interval)
     return VectorizedReviews(np.array(x_data), np.array(y_data), np.array(intervals))
+
+
+def strip_tags(text: str) -> str:
+    return re.sub('<[^<]+?>', '', text)
+
+
+def stability_to_interval(stability: float, target: float = 0.9) -> str:
+    interval = -np.log(target) * stability
+    time_delta = datetime.timedelta(minutes=interval)
+    return str(time_delta)

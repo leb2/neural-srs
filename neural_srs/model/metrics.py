@@ -3,25 +3,59 @@ from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import roc_auc_score
-from tqdm import tqdm
 
 from neural_srs.model.model import Model
 
 import torch
 
-from neural_srs.model.parse import batch_data
 from neural_srs.model.types import Review
-from neural_srs.model.util import vectorize_reviews
+from neural_srs.model.util import vectorize_reviews, stability_to_interval
 from sklearn.calibration import calibration_curve
+from dataclasses import dataclass
 import sklearn
+
+
+@dataclass
+class FormattedEstimate:
+    word: str
+    stability_estimate: float
+    base_fail_rate: float
+
+    def __repr__(self):
+        return f'[{self.word}, {self.base_fail_rate:.2f}, {stability_to_interval(self.stability_estimate)}]'
+
+
+def format_estimates(model: Model):
+    reviews = model.reviews
+
+    formatted_estimates: List[FormattedEstimate] = []
+    for i, card in enumerate(reviews):
+        final_review = card.reviews[-1]
+
+        # todo: model does not train on last incomplete batch
+        if final_review.stability_estimate is None:
+            break
+
+        formatted_estimates.append(FormattedEstimate(
+            word=card.word,
+            stability_estimate=final_review.stability_estimate,
+            base_fail_rate=final_review.base_fail_rate_estimate,
+        ))
+    print("top by fail rate:")
+    formatted_estimates_by_fail_rate = sorted(formatted_estimates, key=lambda x: x.base_fail_rate)
+    for item in formatted_estimates_by_fail_rate[:20]:
+        print(item)
+
+    print("\n")
+    print("top by stability")
+    formatted_estimates_by_stability = sorted(formatted_estimates, key=lambda x: x.stability_estimate)
+    for item in formatted_estimates_by_stability[:20]:
+        print(item)
 
 
 def print_metrics(model: Model) -> None:
     y = model.flattened_y.y
     y_hat = model.flattened_y.y_hat
-
-    accuracy = np.sum((y_hat > 0.6) == y) / len(y_hat)
-    print("accuracy", accuracy)
 
     roc = roc_auc_score(y, y_hat, average=None)
     print("roc score", roc)

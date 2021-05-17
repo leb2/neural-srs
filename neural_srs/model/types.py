@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List, Optional
+
 import numpy as np
 import torch
 
@@ -17,6 +19,15 @@ class Review:
     label: int
     prev_log_interval: float
     next_interval: float
+
+    stability_estimate: Optional[float] = None
+    base_fail_rate_estimate: Optional[float] = None
+
+
+@dataclass()
+class CardReviewHistory:
+    reviews: List[Review] = field(default_factory=lambda: [])
+    word: Optional[str] = None
 
 
 @dataclass

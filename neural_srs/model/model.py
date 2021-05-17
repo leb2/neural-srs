@@ -2,9 +2,10 @@ from typing import Optional, List, Tuple
 import numpy as np
 
 from neural_srs.model.constants import SAVE_ROOT_DIR, DEFAULT_SAVE_PATH
-from neural_srs.model.types import DataBatch, FlattenedY
+from neural_srs.model.types import DataBatch, FlattenedY, CardReviewHistory
 import torch
 from os import path
+from tqdm import tqdm
 
 
 class Model(torch.nn.Module):
@@ -28,6 +29,7 @@ class Model(torch.nn.Module):
         self.predictions: Optional[List[torch.Tensor]] = None  # list of tensors of shape (batch_size, sequence_length)
         self.save_path = save_path
         self._flattened_y: Optional[FlattenedY] = None
+        self.reviews: Optional[List[CardReviewHistory]] = None
 
     def predict_head(self, batch: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -64,7 +66,7 @@ class Model(torch.nn.Module):
         :return: Tensor of shape (num_sequences, sequence_length)
         """
         stability_estimates, base_fail_rate = self.predict_head(batch)
-        probabilities = base_fail_rate * torch.exp(-intervals / stability_estimates)
+        probabilities = (1 - base_fail_rate) * torch.exp(-intervals / stability_estimates)
         return probabilities
 
     @property
@@ -80,7 +82,25 @@ class Model(torch.nn.Module):
         self._flattened_y = FlattenedY(y=np.array(y), y_hat=np.array(y_hat))
         return self._flattened_y
 
-    def save(self, save_name: str) -> None:
+    def compute_estimates(self) -> None:
+        """
+        Computes stability and base_fail_rate estimates for each review, and saves it self.reviews
+        """
+        print("Computing estimates")
+        for batch_num, batch in tqdm(enumerate(self.batches), total=len(self.batches)):
+            batch_size = len(batch.x_data)
+            stability_estimates, base_fail_rates = self.predict_head(batch.x_data)
+
+            for i in range(batch_size):
+                card_index = batch_num * batch_size + i
+                sequence_length = int(batch.mask[i].sum().item())
+                for sequence_index in range(sequence_length):
+                    review = self.reviews[card_index].reviews[sequence_index]
+                    review.stability_estimate = stability_estimates[i, sequence_index].item()
+                    review.base_fail_rate_estimate = base_fail_rates[i, sequence_index].item()
+        self.save()
+
+    def save(self, save_name: str = DEFAULT_SAVE_PATH) -> None:
         torch.save(self, path.join(SAVE_ROOT_DIR, save_name))
 
     @classmethod

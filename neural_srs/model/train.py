@@ -1,5 +1,3 @@
-from typing import List
-
 from tqdm import tqdm
 
 from neural_srs.model.constants import DEFAULT_SAVE_PATH, BATCH_SIZE
@@ -7,19 +5,24 @@ from neural_srs.model.model import Model
 
 import torch
 
-from neural_srs.model.parse import batch_data
-from neural_srs.model.types import Review
+from neural_srs.model.parse import batch_data, load_data
 
 
-def train_model(model: Model, reviews: List[List[Review]], save_path: str = DEFAULT_SAVE_PATH) -> Model:
+def train_model(
+        model: Model,
+        save_path: str = DEFAULT_SAVE_PATH,
+        num_epochs: int = 10,
+) -> Model:
+    reviews = load_data()
     batches = batch_data(reviews, BATCH_SIZE)
 
     num_batches = len(batches)
     num_train_batches = int(num_batches * 0.95)
     model.batches = batches
+    model.reviews = reviews
 
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
-    for epoch in range(1, 10):
+    for epoch in range(1, num_epochs + 1):
         total_train_loss = 0
         total_validation_loss = 0
         count_train = 0
@@ -48,7 +51,7 @@ def train_model(model: Model, reviews: List[List[Review]], save_path: str = DEFA
                 count_validation += 1
 
         average_train_loss = total_train_loss / count_train
-        average_validation_loss = 0  # total_validation_loss / count_validation
+        average_validation_loss = total_validation_loss / count_validation
 
         print("Epoch %d, loss: %.3f, validation loss: %.3f" % (epoch, average_train_loss, average_validation_loss))
         model.predictions = all_predictions
