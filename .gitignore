@@ -4,3 +4,4 @@ weights.pth
 *.csv
 *.txt
 __pycache__/
+saves/
